@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Stickman Dash – Gra Stacha | Oficjalna Strona</title>
+
+<meta name="description" content="Stickman Dash – darmowa gra przeglądarkowa stworzona przez Stacha ze Szkoły nr 19 z klasy 3c. Parkour, bossowie, dash i sklep ze skinami!">
+<meta name="keywords" content="gra, stickman, parkour, dash, boss, gra przeglądarkowa, gra stacha">
+<meta name="author" content="Stach - Szkoła nr 19 - 3c">
+
+<link rel="icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=">
+
+<style>
+body{margin:0;overflow:hidden;background:#87CEEB;font-family:Arial;}
+canvas{display:block;}
+</style>
+</head>
+<body>
+
+<canvas id="game"></canvas>
+
+<script>
+
+/* =========================
+   STICKMAN DASH – GRA STACHA
+   Oficjalna wersja publikacyjna
+========================= */
+
+const canvas=document.getElementById("game");
+const ctx=canvas.getContext("2d");
+canvas.width=window.innerWidth;
+canvas.height=window.innerHeight;
+
+let gameState="menu";
+
+/* ===== ZAPIS ===== */
+
+let level=parseInt(localStorage.getItem("dashLevel"))||1;
+let coins=parseInt(localStorage.getItem("dashCoins"))||0;
+let currentSkin=localStorage.getItem("dashSkin")||"black";
+let owned=JSON.parse(localStorage.getItem("dashOwned"))||["black"];
+let maxLevel=30;
+
+function save(){
+localStorage.setItem("dashLevel",level);
+localStorage.setItem("dashCoins",coins);
+localStorage.setItem("dashSkin",currentSkin);
+localStorage.setItem("dashOwned",JSON.stringify(owned));
+}
+
+/* ===== INPUT ===== */
+
+let keys={};
+let shopOpen=false;
+
+document.addEventListener("keydown",e=>{
+keys[e.key.toLowerCase()]=true;
+
+if(gameState==="menu" && e.key==="Enter") startGame();
+if(gameState==="win" && e.key==="Enter") gameState="menu";
+if(e.key.toLowerCase()==="e" && gameState==="game") shopOpen=!shopOpen;
+});
+
+document.addEventListener("keyup",e=>{
+keys[e.key.toLowerCase()]=false;
+});
+
+canvas.addEventListener("click",e=>{
+if(gameState==="menu"){startGame();return;}
+});
+
+/* ===== GRACZ ===== */
+
+let player={
+x:0,y:0,w:20,h:40,
+dx:0,dy:0,
+speed:0.6,
+jump:15,
+onGround:false,
+canDash:true,
+dashTimer:0
+};
+
+let gravity=0.7;
+let gravityDir=1;
+let friction=0.9;
+
+let platforms=[],bananas=[],spikes=[],portals=[];
+let boss=null;
+let endCoin=null;
+
+const BASE_Y=canvas.height-200;
+const GAP=180;
+let startX=0,startY=0;
+
+/* ===== LEVEL ===== */
+
+function createLevel(){
+
+platforms=[];bananas=[];spikes=[];portals=[];
+boss=null;endCoin=null;gravityDir=1;
+
+let diff=Math.min(level*5,80);
+
+let start={x:100,y:BASE_Y,w:120,h:20};
+platforms.push(start);
+
+startX=start.x+40;
+startY=start.y-player.h;
+
+let prevY=BASE_Y;
+
+for(let i=1;i<=6;i++){
+let offset=Math.random()*diff*2-diff;
+let newY=BASE_Y+offset;
+
+if(Math.abs(newY-prevY)>120){
+newY=prevY+(newY>prevY?120:-120);
+}
+
+platforms.push({x:100+i*GAP,y:newY,w:110,h:20});
+prevY=newY;
+
+if(Math.random()<0.4){
+spikes.push({x:100+i*GAP-35,y:BASE_Y+20,w:30,h:20});
+}
+}
+
+let portalX=100+3*GAP;
+portals.push({x:portalX,y:BASE_Y-70,w:40,h:70});
+platforms.push({x:portalX-60,y:BASE_Y-140,w:130,h:20});
+
+endCoin={x:100+6*GAP+100,y:prevY-40,r:15};
+
+for(let i=0;i<level;i++){
+bananas.push({
+startX:20-i*60,
+startY:BASE_Y-50,
+x:20-i*60,
+y:BASE_Y-50,
+w:20,h:20,
+speed:0.7+level*0.03
+});
+}
+
+if(level%10===0){
+boss={x:100+5*GAP,y:BASE_Y-60,w:60,h:60};
+}
+
+spawn();
+}
+
+function spawn(){
+player.x=startX;
+player.y=startY;
+player.dx=0;
+player.dy=0;
+}
+
+function respawn(){
+spawn();
+bananas.forEach(b=>{b.x=b.startX;b.y=b.startY;});
+}
+
+function startGame(){
+gameState="game";
+createLevel();
+}
+
+/* ===== UPDATE ===== */
+
+function update(){
+
+if(gameState!=="game") return;
+if(shopOpen) return;
+
+if(keys["shift"] && player.canDash){
+player.dx*=3;
+player.canDash=false;
+player.dashTimer=10;
+}
+if(player.dashTimer>0) player.dashTimer--;
+else player.canDash=true;
+
+if(keys["w"]) player.dx+=player.speed;
+if(keys["a"]) player.dx-=player.speed;
+
+if(!keys["w"]&&!keys["a"]){
+player.dx*=friction;
+if(Math.abs(player.dx)<0.05) player.dx=0;
+}
+
+if(keys[" "]&&player.onGround){
+player.dy=-player.jump*gravityDir;
+player.onGround=false;
+}
+
+player.dy+=gravity*gravityDir;
+
+player.x+=player.dx;
+platforms.forEach(p=>{
+if(collide(player,p)){
+if(player.dx>0) player.x=p.x-player.w;
+if(player.dx<0) player.x=p.x+p.w;
+}
+});
+
+player.y+=player.dy;
+player.onGround=false;
+
+platforms.forEach(p=>{
+if(collide(player,p)){
+if(player.dy>0){
+player.y=p.y-player.h;
+player.dy=0;
+player.onGround=true;
+}
+if(player.dy<0){
+player.y=p.y+p.h;
+player.dy=0;
+}
+}
+});
+
+spikes.forEach(s=>{if(collide(player,s)) respawn();});
+portals.forEach(p=>{if(collide(player,p)) gravityDir*=-1;});
+
+bananas.forEach(b=>{
+let angle=Math.atan2(player.y-b.y,player.x-b.x);
+b.x+=Math.cos(angle)*b.speed;
+b.y+=Math.sin(angle)*b.speed;
+if(collide(player,b)) respawn();
+});
+
+if(boss){
+let angle=Math.atan2(player.y-boss.y,player.x-boss.x);
+boss.x+=Math.cos(angle)*1.2;
+boss.y+=Math.sin(angle)*1.2;
+if(collide(player,boss)) respawn();
+}
+
+if(player.y>canvas.height+300) respawn();
+
+let dx=player.x+player.w/2-endCoin.x;
+let dy=player.y+player.h/2-endCoin.y;
+if(Math.sqrt(dx*dx+dy*dy)<endCoin.r+10){
+coins+=20;
+level++;
+if(level>maxLevel){
+gameState="win";
+}else{
+save();
+createLevel();
+}
+}
+}
+
+function collide(a,b){
+return a.x<b.x+b.w &&
+a.x+a.w>b.x &&
+a.y<b.y+b.h &&
+a.y+a.h>b.y;
+}
+
+/* ===== DRAW ===== */
+
+function draw(){
+
+ctx.clearRect(0,0,canvas.width,canvas.height);
+
+if(gameState==="menu"){
+ctx.fillStyle="black";
+ctx.font="60px Arial";
+ctx.fillText("Stickman Dash – Gra Stacha",canvas.width/2-330,200);
+
+ctx.font="26px Arial";
+ctx.fillText("gra stworzona orzez stacha ze szkoły nr 19 z 3c [na razie]",canvas.width/2-360,300);
+
+ctx.font="32px Arial";
+ctx.fillText("Kliknij lub ENTER aby zagrać",canvas.width/2-240,420);
+return;
+}
+
+if(gameState==="win"){
+ctx.fillStyle="gold";
+ctx.font="100px Arial";
+ctx.fillText("👑",canvas.width/2-50,300);
+ctx.font="50px Arial";
+ctx.fillText("WYGRAŁEŚ!",canvas.width/2-150,400);
+return;
+}
+
+ctx.fillStyle=currentSkin;
+ctx.fillRect(player.x,player.y,player.w,player.h);
+
+ctx.fillStyle="brown";
+platforms.forEach(p=>ctx.fillRect(p.x,p.y,p.w,p.h));
+
+ctx.fillStyle="red";
+spikes.forEach(s=>ctx.fillRect(s.x,s.y,s.w,s.h));
+
+ctx.fillStyle="yellow";
+bananas.forEach(b=>ctx.fillRect(b.x,b.y,b.w,b.h));
+
+ctx.fillStyle="purple";
+portals.forEach(p=>ctx.fillRect(p.x,p.y,p.w,p.h));
+
+ctx.fillStyle="lime";
+ctx.beginPath();
+ctx.arc(endCoin.x,endCoin.y,endCoin.r,0,Math.PI*2);
+ctx.fill();
+
+if(boss){
+ctx.fillStyle="darkred";
+ctx.fillRect(boss.x,boss.y,boss.w,boss.h);
+}
+
+ctx.fillStyle="black";
+ctx.font="20px Arial";
+ctx.fillText("Level: "+level,20,30);
+ctx.fillText("Coins: "+coins,20,55);
+ctx.fillText("SHIFT = DASH | E = SKLEP",20,80);
+}
+
+function loop(){
+update();
+draw();
+requestAnimationFrame(loop);
+}
+
+loop();
+
+</script>
+</body>
+</html>
